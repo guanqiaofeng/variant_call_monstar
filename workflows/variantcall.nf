@@ -6,7 +6,7 @@
 
 include { DOWNLOAD_REF } from '../modules/local/download_ref/main'
 include { XML_VCF } from '../modules/local/xml_vcf/main'
-// include { PICARD_LIFTOVERVCF } from '../modules/nf-core/picard/liftovervcf/main'
+include { PICARD_LIFTOVERVCF } from '../modules/nf-core/picard/liftovervcf/main'
 // include { PAYLOAD_VARIANT_CALL } from '../modules/local/payload/variantcall/main'
 // include { SONG_SCORE_UPLOAD } from '../subworkflows/icgc-argo-workflows/song_score_upload/main'
 
@@ -36,19 +36,34 @@ workflow VARIANTCALL {
     // )
 
     // XML to VCF conversion
+
     xml_ch = Channel.fromPath(params.xml)
                 .map { path -> [ [id: '2001205343'], path ] }
 
     XML_VCF (
-        xml_ch
+        xml_ch,
+        Channel.fromPath(params.hg19_ref_fa),
+        Channel.fromPath(params.hg19_ref_fai)
     )
     // ch_versions = ch_versions.mix(XML_VCF.out.versions)
 
-    // // VCF lift over
-    // PICARD_LIFTOVERVCF (
-    //     XML_VCF.out.vcf
-    // )
-    // ch_versions = ch_versions.mix(LIFT_OVER.out.versions)
+    // VCF lift over
+    hg38_ref_ch = Channel.fromPath(params.hg38_ref_fa)
+                            .map{ path -> [ [id: 'fasta'], path ] }
+
+    hg38_ref_dict = Channel.fromPath(params.hg38_ref_dict)
+                            .map{ path -> [ [id: 'dict'], path ] }
+
+    hg19_to_hg38_chain_ch = Channel.fromPath(params.hg19_to_hg38_chain)
+                            .map{ path -> [ [id: 'chain'], path ] }
+
+    PICARD_LIFTOVERVCF (
+        XML_VCF.out.vcf,
+        hg38_ref_dict,
+        hg38_ref_ch,
+        hg19_to_hg38_chain_ch
+    )
+    ch_versions = ch_versions.mix(PICARD_LIFTOVERVCF.out.versions)
 
     // // Payload generation
     // PAYLOAD_VARIANT_CALL (

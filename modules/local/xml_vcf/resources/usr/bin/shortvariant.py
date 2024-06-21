@@ -24,8 +24,9 @@
 import xml.etree.ElementTree as ET
 import pandas as pd
 import argparse
+import re
 
-def create_vcf_header(root):
+def create_vcf_header(root, chrs, chr_dic):
     # Extract attributes from variant-report element
     curation_version_id = root.get('curation-version-id')
     disease = root.get('disease')
@@ -56,11 +57,24 @@ def create_vcf_header(root):
         f'##test-type="{test_type}"',
         f'##name="{name}"',
         f'##bait-set="{bait_set}"',
+    ]
+
+    # Remove duplicates while preserving order
+    unique_chrs = list(dict.fromkeys(chrs))
+
+    # Add contig lines based on chrs and chr_dic
+    for chr_id in unique_chrs:
+        if chr_id in chr_dic:
+            length = chr_dic[chr_id]
+            headers.append(f'##contig=<ID={chr_id},length={length}>')
+
+    # Add INFO headers
+    headers.extend([
         '##INFO=<ID=DP,Number=1,Type=Integer,Description="Total Depth">',
         '##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">',
-        '##INFO=<ID=SOMATIC-OR-GERMLINE,Type=String,Description="somatic or germline">',
-        '##INFO=<ID=ZYGOSITY,Type=String,Description="sample zygosity">'
-    ]
+        '##INFO=<ID=SOMATIC-OR-GERMLINE,Number=1,Type=String,Description="somatic or germline">',
+        '##INFO=<ID=ZYGOSITY,Number=1,Type=String,Description="sample zygosity">'
+    ])
 
     return headers
 
@@ -77,38 +91,62 @@ def extract_data_from_short_variant(short_variant):
         'ZYGOSITY': short_variant.get('tumor-zygosity')
     }
 
-def chr_pos_sort(df):
-    # Define a custom sort order for chromosome numbers
-    chrom_order = {'chr' + str(i): i for i in range(1, 23)}
-    chrom_order['chrX'] = 23
-    chrom_order['chrY'] = 24
+def chr_pos_order(chr_list): # this code is specific for hg19 genome assembly it sort chr based on "chr1, chr2, chrX, chrY, chrUn_, chrM"
+    chr_sort = {}
+    chr_order = []
+    for i in chr_list:
+        match = re.search(r'chr(\d)(?=\D|$)', i)
+        if match:
+            digit = match.group(1)
+            new_i = re.sub(r'chr(\d)(?=\D|$)', rf'chr0{digit}', i)
+            chr_sort[i] = new_i
+        elif re.match(r'chrX', i):
+            chr_sort[i] = 'chr66X'
+        elif re.match(r'chrY', i):
+            chr_sort[i] = 'chr77Y'
+        elif re.search(r'chrUn', i):
+            chr_sort[i] = re.sub(r'chrUn', r'chr88Un', i)
+        elif re.match(r'chrM', i):
+            chr_sort[i] = 'chr99M'
+        else:
+            chr_sort[i] = i
 
-    # Apply the custom sort order
-    df['#CHROM'] = df['#CHROM'].map(chrom_order)
-    df['POS'] = df['POS'].astype(int)
+    # Sort the dictionary based on its values and then convert the keys to a list
+    chr_order = sorted(chr_sort, key=lambda k: chr_sort[k])
+
+    return chr_order
+
+
+def chr_pos_sort(df, chr_ordered): # sort dataframe based on chr and pos
+
+    cat_type = pd.CategoricalDtype(categories=chr_ordered, ordered=True)
+
+    # Convert the #CHROM column to the categorical data type
+    df['#CHROM'] = df['#CHROM'].astype(cat_type)
 
     # Sort the DataFrame first by '#CHROM' and then by 'POS'
     sorted_df = df.sort_values(by=['#CHROM', 'POS'])
 
     # Convert the chromosome numbers back to their original format
-    sorted_df['#CHROM'] = 'chr' + sorted_df['#CHROM'].astype(str)
+    sorted_df['#CHROM'] = sorted_df['#CHROM'].astype(str)
 
     return sorted_df
 
 # Process dataframe by adding "ID", "QUAL", "FILTER" with default value "." and "INFO" with "DP=#;AF=#"
 # where DP means depth and AF means allele frequency
-def process_dataframe(df):
+def process_dataframe(df, chr_list):
 
     df['ID'] = '.'
     df['QUAL'] = '.'
     df['FILTER'] = '.'
     df['INFO'] = 'DP=' + df['DP'].astype(str) + ';AF=' + df['AF'].astype(str) + ';SOMATIC-OR-GERMLINE=' + df['SOMATIC-or-GERMLINE'] + ';ZYGOSITY=' + df['ZYGOSITY']
     df.drop(['DP', 'AF'], axis=1, inplace=True)
+    df['POS'] = df['POS'].astype(int)
     desired_order = ['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER', 'INFO']
     df = df[desired_order]
-    sorted_df = chr_pos_sort(df.copy())
+    sorted_df = chr_pos_sort(df.copy(), chr_list)
 
-    return sorted_df
+    return sorted_df,sorted_df['#CHROM']
 
 def main():
     # Create the parser
@@ -116,6 +154,9 @@ def main():
 
     # Add input file argument
     parser.add_argument('-i', '--input', type=str, required=True, help="Input file name")
+
+    # Add hg19 fasta reference file
+    parser.add_argument('-r', '--reference', type=str, required=True, help="hg19 reference fai file name")
 
     # Add output file argument
     parser.add_argument('-o', '--output', type=str, required=True, help="Output file name")
@@ -125,13 +166,18 @@ def main():
 
     # Use the parsed input and output file names
     input_file_name = args.input
+    reference_file_name = args.reference
     output_file_name = args.output
 
     tree = ET.parse(input_file_name)
     root = tree.getroot()
 
-    # Create VCF headers
-    vcf_headers = create_vcf_header(root)
+    chr_dic = {}
+    with open(reference_file_name, 'r') as f:
+        for line in f:
+            chr_name = line.split('\t')[0].strip()
+            chr_len = int(line.split('\t')[1].strip())
+            chr_dic[chr_name] = chr_len
 
     # Extract information from xml
     data = []
@@ -141,8 +187,14 @@ def main():
         data.append(short_variant_data)
     df = pd.DataFrame(data)
 
+    # Get chromosome order information
+    chr_ordered = chr_pos_order(list(chr_dic))
+
     # Process the DataFrame
-    df_processed = process_dataframe(df)
+    df_processed,chrs = process_dataframe(df, chr_ordered)
+
+    # Create VCF headers
+    vcf_headers = create_vcf_header(root, chrs, chr_dic)
 
     # Write headers and data to VCF file
     with open(output_file_name, 'w') as f:

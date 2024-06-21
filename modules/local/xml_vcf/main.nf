@@ -6,13 +6,15 @@ process XML_VCF {
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/biocontainers/pandas' :
         'biocontainers/pandas:2.2.1' }"
-
+        // 'docker.io/gfeng2023/pandas-pyfaidx-image:latest' }"
 
     input:
     tuple val(meta), path(xml)
+    path (hg19_fa)
+    path (hg19_fai)
 
     output:
-    // tuple val(meta), path "*.vcf", emit: vcf
+    tuple val(meta), path ("*.short_variant.vcf"), emit: vcf
 
     when:
     task.ext.when == null || task.ext.when
@@ -21,8 +23,15 @@ process XML_VCF {
     def prefix = task.ext.prefix ?: "${meta.id}"
 
     """
-    main.py \\
-        -i ${xml} \\
+    shortvariant.py \
+        -i ${xml} \
+        -r ${hg19_fai} \
         -o ${prefix}.short_variant.vcf
     """
 }
+//
+    // rearrangement.py \\
+    //     -i ${xml} \\
+    //     -r ${hg19_fa} \\
+    //     -r2 ${hg19_fai} \\
+        // -o ${prefix}.rearrangement.vcf
