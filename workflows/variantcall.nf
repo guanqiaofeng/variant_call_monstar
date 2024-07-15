@@ -8,6 +8,7 @@ include { DOWNLOAD_REF } from '../modules/local/download_ref/main'
 include { XML_VCF } from '../modules/local/xml_vcf/main'
 include { PICARD_LIFTOVERVCF as  PICARD_LIFTOVERVCF_SV} from '../modules/nf-core/picard/liftovervcf/main'
 include { PICARD_LIFTOVERVCF as PICARD_LIFTOVERVCF_RA} from '../modules/nf-core/picard/liftovervcf/main'
+include { sanityCheck } from '../modules/local/payload/main'
 // include { PAYLOAD_VARIANT_CALL } from '../modules/local/payload/variantcall/main'
 // include { SONG_SCORE_UPLOAD } from '../subworkflows/icgc-argo-workflows/song_score_upload/main'
 
@@ -41,11 +42,11 @@ workflow VARIANTCALL {
     xml_ch = Channel.fromPath(params.xml)
                 .map { path -> [ [id: '2001205343'], path ] }
 
-    XML_VCF (
-        xml_ch,
-        Channel.fromPath(params.hg19_ref_fa),
-        Channel.fromPath(params.hg19_ref_fai)
-    )
+    // XML_VCF (
+    //     xml_ch,
+    //     Channel.fromPath(params.hg19_ref_fa),
+    //     Channel.fromPath(params.hg19_ref_fai)
+    // )
     // ch_versions = ch_versions.mix(XML_VCF.out.versions)
 
     // VCF lift over
@@ -58,25 +59,35 @@ workflow VARIANTCALL {
     hg19_to_hg38_chain_ch = Channel.fromPath(params.hg19_to_hg38_chain)
                             .map{ path -> [ [id: 'chain'], path ] }
 
-    PICARD_LIFTOVERVCF_SV (
-        XML_VCF.out.short_variant_vcf,
-        hg38_ref_dict,
-        hg38_ref_ch,
-        hg19_to_hg38_chain_ch
-    )
-    ch_versions = ch_versions.mix(PICARD_LIFTOVERVCF_SV.out.versions)
+    // PICARD_LIFTOVERVCF_SV (
+    //     XML_VCF.out.short_variant_vcf,
+    //     hg38_ref_dict,
+    //     hg38_ref_ch,
+    //     hg19_to_hg38_chain_ch
+    // )
+    // ch_versions = ch_versions.mix(PICARD_LIFTOVERVCF_SV.out.versions)
 
-    PICARD_LIFTOVERVCF_RA (
-        XML_VCF.out.rearrangement_vcf,
-        hg38_ref_dict,
-        hg38_ref_ch,
-        hg19_to_hg38_chain_ch
-    )
-    ch_versions = ch_versions.mix(PICARD_LIFTOVERVCF_RA.out.versions)
+    // PICARD_LIFTOVERVCF_RA (
+    //     XML_VCF.out.rearrangement_vcf,
+    //     hg38_ref_dict,
+    //     hg38_ref_ch,
+    //     hg19_to_hg38_chain_ch
+    // )
+    // ch_versions = ch_versions.mix(PICARD_LIFTOVERVCF_RA.out.versions)
 
-    // // Payload generation
+    // SanityCheck
+    sanityCheck(
+        file(params.experiment_info_tsv),
+        params.api_token,
+        params.song_url,
+        params.clinical_url,
+        params.skip_duplicate_check
+    )
+
+    // Payload generation
     // PAYLOAD_VARIANT_CALL (
-    //     LIFT_OVER.out.updatedvcf
+    //     LIFT_OVER.out.vcf_lifted
+    //     molecular_mapping_tsv
     // )
     // ch_versions = ch_versions.mix(PAYLOAD_VARIANT_CALL.out.versions)
 
