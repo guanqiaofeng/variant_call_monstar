@@ -17,6 +17,7 @@ process XML_VCF {
     output:
     tuple val(meta), path ("*.short_variant.vcf"), emit: short_variant_vcf
     tuple val(meta), path ("*.rearrangement.vcf"), emit: rearrangement_vcf
+    path "versions.yml", emit: versions
 
     when:
     task.ext.when == null || task.ext.when

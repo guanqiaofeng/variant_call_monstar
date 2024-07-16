@@ -1,34 +1,39 @@
-process sanityCheck {
-    // tag "$meta.id"
+process PAYLOAD_ALIGNMENT {
+    tag "$meta.id"
     label 'process_single'
 
-    conda "${moduleDir}/environment.yml"
+
+    conda "bioconda::multiqc=1.13"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
-        'https://depot.galaxyproject.org/singularity/biocontainers/pandas' :
-        'docker.io/gfeng2023/python_pandas_requests:latest' }"
+        'https://depot.galaxyproject.org/singularity/multiqc:1.13--pyhdfd78af_0' :
+        'quay.io/biocontainers/multiqc:1.13--pyhdfd78af_0' }"
 
-        // 'ghcr.io/icgc-argo/argo-data-submission.sanity-check:0.1.3' }"
+    input:  // input, make update as needed
+      tuple val(meta), path(files_to_upload), path(metadata_analysis)
+      path pipeline_yml
 
-  input:  // input, make update as needed
-    path experiment_info_tsv
-    val api_token
-    val song_url
-    val clinical_url
-    val skip_duplicate_check
 
-  output:  // output, make update as needed
-    path "updated*tsv", emit: updated_experiment_info_tsv
+    output:  // output, make update as needed
+      tuple val(meta), path("*.payload.json"), path("out/*"), emit: payload_files
+      path "versions.yml", emit: versions
 
-  script:
-    // add and initialize variables here as needed
-    args_skip_duplicate_check = skip_duplicate_check==true ? "--force" : ""
-    """
-    main.py \
-      -x ${experiment_info_tsv} \
-      -t ${api_token} \
-      -s ${song_url} \
-      -c ${clinical_url} \
-      ${args_skip_duplicate_check}
-    """
-}
+    script:
+      // add and initialize variables here as needed
+      def arg_pipeline_yml = pipeline_yml.name != 'NO_FILE' ? "-p $pipeline_yml" : ''
+      """
+      main.py \
+        -f ${files_to_upload} \
+        -a ${metadata_analysis} \
+        -w "Variant Calling" \
+        -r ${workflow.runName} \
+        -s "${workflow.sessionId}" \
+        -v "${workflow.manifest.version}" \
+        $arg_pipeline_yml
 
+      cat <<-END_VERSIONS > versions.yml
+      "${task.process}":
+          python: \$(python --version | sed 's/Python //g')
+      END_VERSIONS
+      """
+  }
+//           -b "${meta.genomeBuild}" \
