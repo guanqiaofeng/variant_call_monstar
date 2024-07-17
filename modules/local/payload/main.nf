@@ -1,12 +1,13 @@
-process PAYLOAD_ALIGNMENT {
-    tag "$meta.id"
+process PAYLOAD_VARIANT_CALL {
+    // tag "$meta.id"
     label 'process_single'
-
 
     conda "bioconda::multiqc=1.13"
     container "${ workflow.containerEngine == 'singularity' && !task.ext.singularity_pull_docker_container ?
         'https://depot.galaxyproject.org/singularity/multiqc:1.13--pyhdfd78af_0' :
         'quay.io/biocontainers/multiqc:1.13--pyhdfd78af_0' }"
+        // 'quay.io/biocontainers/pandas:0.23.4--py36hf8a1672_0' }"
+        // 'quay.io/biocontainers/multiqc:1.23--pyhdfd78af_0' }"
 
     input:  // input, make update as needed
       tuple val(meta), path(files_to_upload), path(metadata_analysis)

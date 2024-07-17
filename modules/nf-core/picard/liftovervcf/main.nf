@@ -15,6 +15,7 @@ process PICARD_LIFTOVERVCF {
 
     output:
     tuple val(meta), path("*.lifted.vcf.gz")  , emit: vcf_lifted
+    tuple val(meta), path("*.lifted.vcf.gz.tbi"), emit: vcf_lifted_index
     tuple val(meta), path("*.unlifted.vcf.gz"), emit: vcf_unlifted
     path "versions.yml"                       , emit: versions
 

@@ -37,7 +37,7 @@ from glob import glob
 import yaml
 import io
 import shutil
-import pandas as pd
+import csv
 
 workflow_full_name = {
     'variant-calling': 'Variant Calling'
@@ -98,11 +98,11 @@ def rename_file(f, payload, seq_experiment_analysis_dict, date_str):
 def get_files_info(file_to_upload,pipeline_info):
     return {
         'fileName': os.path.basename(file_to_upload),
-        'fileType': 'VCF',
+        'fileType': 'VCF' if file_to_upload.split(".")[-2] == 'vcf' else 'TBI',
         'fileSize': calculate_size(file_to_upload),
         'fileMd5sum': calculate_md5(file_to_upload),
         'fileAccess': 'controlled',
-        'dataType': 'Raw Variant Calls' if file_to_upload.split(".")[-2] == 'vcf' else 'Variant Call Index',
+        'dataType': 'Raw Variant Calls' if file_to_upload.split(".")[-2] == 'vcf' else 'VCF Index',
         'info': {
             'data_category': 'Simple Nucleotide Variation' if file_to_upload.split(".")[-4] == 'snv' or file_to_upload.split(".")[-5] == 'snv' else 'Rearrangement Variation',
             'analysis_tools': [{key.split(":")[-1]:pipeline_info[key]} for key in pipeline_info.keys()] # to work on it later
@@ -111,8 +111,9 @@ def get_files_info(file_to_upload,pipeline_info):
 
 def main(args):
     with open(args.seq_experiment_analysis, 'r') as f:
-        seq_experiment_analysis_df = pd.read_csv(f, sep='\t')
-        seq_experiment_analysis_dict = seq_experiment_analysis_df.iloc[0].to_dict()
+        reader = csv.DictReader(f, delimiter='\t')
+        for row in reader:
+            seq_experiment_analysis_dict = row
 
     pipeline_info = {}
     if args.pipeline_yml:
@@ -132,7 +133,7 @@ def main(args):
         'samples': [
             {
                 'submitterSampleId' : seq_experiment_analysis_dict.get('submitter_sample_id'),
-                'matchedNormalSubmitterSampleId' : seq_experiment_analysis_dict.get('submitter_matched_normal_sample_id'),
+                'matchedNormalSubmitterSampleId' : seq_experiment_analysis_dict.get('submitter_matched_normal_sample_id') or None,
                 'sampleType' : seq_experiment_analysis_dict.get('sample_type'),
                 'specimen' : {
                     'submitterSpecimenId' : seq_experiment_analysis_dict.get('submitter_specimen_id'),
@@ -146,9 +147,7 @@ def main(args):
                 }
             }
         ],
-        'analysisType': {
-            'name': 'variant_calling'
-        },
+        'analysisType': { 'name': 'variant_calling' },
         'variant_calling_strategy': ['Tumour Only'], # need further confirm
         'workflow': {
             'genome_build': 'GRCh38',
