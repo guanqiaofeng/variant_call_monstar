@@ -8,11 +8,11 @@ include { DOWNLOAD_REF } from '../modules/local/download_ref/main'
 include { XML_VCF } from '../modules/local/xml_vcf/main'
 include { PICARD_LIFTOVERVCF as  PICARD_LIFTOVERVCF_SV } from '../modules/nf-core/picard/liftovervcf/main'
 include { PICARD_LIFTOVERVCF as PICARD_LIFTOVERVCF_RA } from '../modules/nf-core/picard/liftovervcf/main'
-// include { sanityCheck } from '../modules/local/payload/main'
 include { sanityCheck } from '../modules/local/prep/metadata/main'
 include { PAYLOAD_VARIANT_CALL as  PAYLOAD_VARIANT_CALL_SV } from '../modules/local/payload/main'
 include { PAYLOAD_VARIANT_CALL as  PAYLOAD_VARIANT_CALL_RA } from '../modules/local/payload/main'
-// include { SONG_SCORE_UPLOAD } from '../subworkflows/icgc-argo-workflows/song_score_upload/main'
+include { SONG_SCORE_UPLOAD as SONG_SCORE_UPLOAD_SV } from '../subworkflows/icgc-argo-workflows/song_score_upload/main'
+include { SONG_SCORE_UPLOAD as SONG_SCORE_UPLOAD_RA } from '../subworkflows/icgc-argo-workflows/song_score_upload/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -21,6 +21,8 @@ include { PAYLOAD_VARIANT_CALL as  PAYLOAD_VARIANT_CALL_RA } from '../modules/lo
 */
 
 workflow VARIANTCALL {
+
+    println(params.api_token)
 
     // take:
     // xml
@@ -40,14 +42,41 @@ workflow VARIANTCALL {
     // )
 
     // SanityCheck
-    // sanityCheck(
-    //     file(params.experiment_info_tsv),
-    //     params.api_token,
-    //     params.song_url,
-    //     params.clinical_url,
-    //     params.skip_duplicate_check
-    // )
-    // ch_versions = ch_versions.mix(sanityCheck.out.versions)
+    sanityCheck(
+        file(params.experiment_info_tsv),
+        params.api_token,
+        params.song_url,
+        params.clinical_url,
+        params.skip_duplicate_check
+    )
+    ch_versions = ch_versions.mix(sanityCheck.out.versions)
+
+    // sanity_ch = Channel.fromPath(params.sanity)
+    // sanity_ch
+    // .collectFile(keepHeader: true, name: 'updated_sample.tsv')
+    // .splitCsv(header: true, sep: '\t')
+    // .map { row ->
+    //     [
+    //         study_id: row.program_id,
+    //         sample_id: row.sample_id,
+    //         donor_id: row.donor_id,
+    //         specimen_id: row.specimen_id,
+    //         experimental_strategy: row.experimental_strategy
+    //     ]
+    // }.set{meta_ch}
+
+    sanityCheck.out.updated_experiment_info_tsv
+    .collectFile(keepHeader: true, name: 'updated_sample.tsv')
+    .splitCsv(header: true, sep: '\t')
+    .map { row ->
+         [
+            study_id: row.program_id,
+            sample_id: row.sample_id,
+            donor_id: row.donor_id,
+            specimen_id: row.specimen_id,
+            experimental_strategy: row.experimental_strategy
+        ]
+    }.set{meta_ch}
 
     // XML to VCF conversion
 
@@ -71,7 +100,7 @@ workflow VARIANTCALL {
     hg19_to_hg38_chain_ch = Channel.fromPath(params.hg19_to_hg38_chain)
                             .map{ path -> [ [id: 'chain'], path ] }
 
-    // Short Vraint
+    // Short Vraint \\
     // lift over
     PICARD_LIFTOVERVCF_SV (
         XML_VCF.out.short_variant_vcf,
@@ -82,27 +111,16 @@ workflow VARIANTCALL {
     ch_versions = ch_versions.mix(PICARD_LIFTOVERVCF_SV.out.versions)
 
     //Payload Generation
-    sanity_ch = Channel.fromPath(params.sanity)
-
     PICARD_LIFTOVERVCF_SV.out.vcf_lifted
     .combine(PICARD_LIFTOVERVCF_SV.out.vcf_lifted_index)
-    .combine(sanity_ch)
+    .combine(meta_ch)
+    .combine(sanityCheck.out.updated_experiment_info_tsv)
     .map{
-        metaA, vcf, metaB, index, metadata_analysis ->
+        metaA, vcf, metaB, index, meta, metadata_analysis ->
         [
-            metaA, [vcf, index], metadata_analysis
+            meta, [vcf, index], metadata_analysis
         ]
     }.set{vcf_and_index_sv}
-
-    // PICARD_LIFTOVERVCF_SV.out.vcf_lifted
-    // .combine(PICARD_LIFTOVERVCF_SV.out.vcf_lifted_index)
-    // .combine(sanityCheck.out.updated_experiment_info_tsv)
-    // .map{
-    //     metaA, vcf, metaB, index, metadata_analysis ->
-    //     [
-    //         metaA, [vcf, index], metadata_analysis
-    //     ]
-    // }.set{vcf_and_index}
 
     PAYLOAD_VARIANT_CALL_SV (
         vcf_and_index_sv,
@@ -111,11 +129,15 @@ workflow VARIANTCALL {
         .mix(PICARD_LIFTOVERVCF_SV.out.versions)
         .collectFile(name: 'collated_versions.yml')
     )
+    ch_versions = ch_versions.mix(PAYLOAD_VARIANT_CALL_SV.out.versions)
+
+    PAYLOAD_VARIANT_CALL_SV.out.payload_files.subscribe { println("payload output: ${it}") }
 
     // Upload
+    SONG_SCORE_UPLOAD_SV(PAYLOAD_VARIANT_CALL_SV.out.payload_files) // [val(meta), path("*.payload.json"), [path(CRAM),path(CRAI)]
+    ch_versions = ch_versions.mix(SONG_SCORE_UPLOAD_SV.out.versions)
 
-
-    // Rearrangement
+    // Rearrangement \\
     // lift over
     PICARD_LIFTOVERVCF_RA (
         XML_VCF.out.rearrangement_vcf,
@@ -126,27 +148,16 @@ workflow VARIANTCALL {
     ch_versions = ch_versions.mix(PICARD_LIFTOVERVCF_RA.out.versions)
 
     //Payload Generation
-    sanity_ch = Channel.fromPath(params.sanity)
-
     PICARD_LIFTOVERVCF_RA.out.vcf_lifted
     .combine(PICARD_LIFTOVERVCF_RA.out.vcf_lifted_index)
-    .combine(sanity_ch)
+    .combine(meta_ch)
+    .combine(sanityCheck.out.updated_experiment_info_tsv)
     .map{
-        metaA, vcf, metaB, index, metadata_analysis ->
+        metaA, vcf, metaB, index, meta, metadata_analysis ->
         [
-            metaA, [vcf, index], metadata_analysis
+            meta, [vcf, index], metadata_analysis
         ]
     }.set{vcf_and_index_ra}
-
-    // PICARD_LIFTOVERVCF_SV.out.vcf_lifted
-    // .combine(PICARD_LIFTOVERVCF_SV.out.vcf_lifted_index)
-    // .combine(sanityCheck.out.updated_experiment_info_tsv)
-    // .map{
-    //     metaA, vcf, metaB, index, metadata_analysis ->
-    //     [
-    //         metaA, [vcf, index], metadata_analysis
-    //     ]
-    // }.set{vcf_and_index}
 
     PAYLOAD_VARIANT_CALL_RA (
         vcf_and_index_ra,
@@ -155,19 +166,11 @@ workflow VARIANTCALL {
         .mix(PICARD_LIFTOVERVCF_RA.out.versions)
         .collectFile(name: 'collated_versions.yml')
     )
+    ch_versions = ch_versions.mix(PAYLOAD_VARIANT_CALL_RA.out.versions)
 
-    // Payload generation
-    // PAYLOAD_VARIANT_CALL (
-    //     LIFT_OVER.out.vcf_lifted
-    //     molecular_mapping_tsv
-    // )
-    // ch_versions = ch_versions.mix(PAYLOAD_VARIANT_CALL.out.versions)
-
-    // // Upload
-    // SONG_SCORE_UPLOAD (
-    //     PAYLOAD_ALIGNMENT_H.out.payload_files
-    // ) // [val(meta), path("*.payload.json"), path VCF]
-    // ch_versions = ch_versions.mix(SONG_SCORE_UPLOAD.out.versions)
+    // Upload
+    SONG_SCORE_UPLOAD_RA(PAYLOAD_VARIANT_CALL_RA.out.payload_files) // [val(meta), path("*.payload.json"), [path(CRAM),path(CRAI)]
+    ch_versions = ch_versions.mix(SONG_SCORE_UPLOAD_RA.out.versions)
 
     emit:
 

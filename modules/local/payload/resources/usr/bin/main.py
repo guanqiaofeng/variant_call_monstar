@@ -148,7 +148,7 @@ def main(args):
             }
         ],
         'analysisType': { 'name': 'variant_calling' },
-        'variant_calling_strategy': ['Tumour Only'], # need further confirm
+        'variant_calling_strategy': 'Tumour Only', # need further confirm
         'workflow': {
             'genome_build': 'GRCh38',
             'workflow_name': 'FoundationOneCDx',
@@ -156,7 +156,7 @@ def main(args):
             'workflow_short_name': 'F1CDx'
         },
         'experiment' : {
-            'submitter_sequencing_experiment_id': seq_experiment_analysis_dict.get('submitter_sequencing_experiment_id'),
+            'submitter_sequencing_experiment_id': seq_experiment_analysis_dict.get('submitter_sequencing_experiment_id') or "something",
             'platform' : seq_experiment_analysis_dict.get('platform'),
             'experimental_strategy': 'Targeted-Seq',
             'target_capture_kit': seq_experiment_analysis_dict.get('target_capture_kit'),
